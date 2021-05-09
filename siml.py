@@ -4,6 +4,7 @@ import numba
 from numba import types, typed, typeof, float64, int64, boolean
 from numba.experimental import jitclass
 import matplotlib.pyplot as plt
+import matplotlib.animation as animation
 
 #%%
 
@@ -49,8 +50,18 @@ class SIML:
             self.labels_history.append(self.cluster_labels.copy())
             self.likelihoods_history.append(self.count_likelihood())
 
-    def count_likelihood(self): #FIXME
-        return 0
+    def count_likelihood(self):
+        ans = 0
+        dimension = self.data_X.shape[1]
+        size = self.data_X.shape[0]
+
+        for cluster in range(self.number_clusters):
+            n = np.sum(self.cluster_labels == cluster)
+            det = self.determinants[cluster]
+
+            ans += n * (dimension * (-1/2 - np.log(2*np.pi) / 2) - np.log(det) / 2 + np.log(n / size))
+
+        return ans
 
     def update_vars(self):
         for cluster in np.arange(self.number_clusters)[self.changed_clusters]:
@@ -128,6 +139,16 @@ class SIML:
                 rhs += part_size
                 rhs = min(len(self.data_X), rhs)
 
+# %%
+def labels_history_to_video(data_X, labels_history, interval, output_name):
+    fig = plt.figure()
+    ims = []
+    for i in range(len(labels_history)):
+        im = plt.scatter(data_X[:, 0], data_X[:, 1], c=labels_history[i])
+        ims.append([im])
+
+    ani = animation.ArtistAnimation(fig, ims, interval=50, blit=True, repeat_delay=1000)
+    ani.save(output_name)
 
     
 
@@ -164,6 +185,15 @@ if __name__ == '__main__':
     plt.scatter(x[:, 0], x[:, 1], c=new_labels)
     plt.show()
 
+    plt.title('likelihood history')
+    plt.plot(range(len(siml.likelihoods_history)), siml.likelihoods_history)
+    plt.show()
+
+    plt.title('likelihood history first 100')
+    plt.plot(range(len(siml.likelihoods_history[:100])), siml.likelihoods_history[:100])
+    plt.show()
+
+    labels_history_to_video(x, siml.labels_history[:200], 50, 'test.gif')
 
 
 # %%
