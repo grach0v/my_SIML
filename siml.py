@@ -1,6 +1,6 @@
 #%%
 import numpy as np
-import numba
+import numba as nb
 from numba import types, typed, typeof, float64, int64, boolean
 from numba.experimental import jitclass
 import matplotlib.pyplot as plt
@@ -8,6 +8,7 @@ import matplotlib.animation as animation
 
 #%%
 
+int_vector = types.Array(dtype=nb.int64, ndim=1, layout="C")
 spec = [
     ('data_X', float64[:, :]),
     ('cluster_labels', int64[:]),
@@ -20,14 +21,14 @@ spec = [
     ('determinants', float64[:]),
     ('inverse_mats', float64[:, :, :]),
     ('changed_clusters', boolean[:]), #?
-    ('labels_history', typeof(typed.List.empty_list(int64[:]))), #FIXME
+    ('labels_history', types.ListType(int_vector)),
     ('likelihoods_history', types.ListType(types.float64))
 ]
 
 
 @jitclass(spec)
 class SIML:
-    def __init__(self, data_X, cluster_labels, update_parts=10, iter_limit=1e3, debug=False, labels_history=typed.List.empty_list(int64[:])): #REMOVE labels_history
+    def __init__(self, data_X, cluster_labels, update_parts=1, iter_limit=100, debug=False):
         self.data_X = data_X
         self.cluster_labels = cluster_labels.copy()
         self.update_parts = update_parts
@@ -43,7 +44,7 @@ class SIML:
         self.changed_clusters = np.ones(self.number_clusters, dtype=boolean)
 
 
-        self.labels_history = labels_history
+        self.labels_history = typed.List.empty_list(int_vector)
         self.likelihoods_history = typed.List.empty_list(types.float64)
 
         if self.debug:
@@ -140,14 +141,14 @@ class SIML:
                 rhs = min(len(self.data_X), rhs)
 
 # %%
-def labels_history_to_video(data_X, labels_history, interval, output_name):
+def labels_history_to_video(data_X, labels_history, interval, output_name, alpha=1):
     fig = plt.figure()
     ims = []
     for i in range(len(labels_history)):
-        im = plt.scatter(data_X[:, 0], data_X[:, 1], c=labels_history[i])
+        im = plt.scatter(data_X[:, 0], data_X[:, 1], c=labels_history[i], alpha=alpha)
         ims.append([im])
 
-    ani = animation.ArtistAnimation(fig, ims, interval=50, blit=True, repeat_delay=1000)
+    ani = animation.ArtistAnimation(fig, ims, interval=interval, blit=True, repeat_delay=1000)
     ani.save(output_name)
 
     
@@ -156,11 +157,11 @@ def labels_history_to_video(data_X, labels_history, interval, output_name):
 if __name__ == '__main__':
 
     size = 100
-    a = np.random.normal(0, 0.4, size)
-    b = np.random.normal(0, 0.4, size)
-    c = np.random.normal(0, 0.4, size)
-    d = np.random.normal(0, 0.4, size)
-    e = np.random.normal(0, 0.4, size)
+    a = np.random.normal(0, 0.5, size)
+    b = np.random.normal(0, 0.5, size)
+    c = np.random.normal(0, 0.5, size)
+    d = np.random.normal(0, 0.5, size)
+    e = np.random.normal(0, 0.5, size)
 
 
     x = np.concatenate((np.asarray([a - 1, b - 1]).T,
@@ -189,11 +190,38 @@ if __name__ == '__main__':
     plt.plot(range(len(siml.likelihoods_history)), siml.likelihoods_history)
     plt.show()
 
-    plt.title('likelihood history first 100')
-    plt.plot(range(len(siml.likelihoods_history[:100])), siml.likelihoods_history[:100])
+    labels_history_to_video(x, siml.labels_history[:200], 50, 'test.gif')
+
+
+# %%
+if __name__ == '__main__':
+    length = 10000
+    dimension = 8
+
+    X = np.random.normal(size=(length, dimension - 1))
+    Y = np.concatenate([np.random.normal(loc=-2, size=(length // 2, 1)), 
+                        np.random.normal(loc=2, size=(length // 2, 1))], axis=0)
+
+    X = np.concatenate([X, Y], axis=1)
+
+    labels = np.concatenate([np.random.random(length // 2)*0.7,\
+                            0.3 + np.random.random(length // 2)*0.7], axis=0).round().astype(int)
+
+    siml = SIML(X, labels, debug=True)
+    siml.cluster()
+
+    plt.title('Initital labels')
+    plt.scatter(X[:, dimension - 2], X[:, dimension - 1], c=labels)
     plt.show()
 
-    labels_history_to_video(x, siml.labels_history[:200], 50, 'test.gif')
+    new_labels = siml.cluster_labels
+    plt.title('Siml labels')
+    plt.scatter(X[:, dimension - 2], X[:, dimension - 1], c=new_labels)
+    plt.show()
+
+    plt.title('likelihood history')
+    plt.plot(range(len(siml.likelihoods_history)), siml.likelihoods_history)
+    plt.show()
 
 
 # %%
