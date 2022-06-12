@@ -1,8 +1,10 @@
 #%%
+from numba.np.ufunc import parallel
 import numpy as np
 import numba as nb
 from numba import types, typed, typeof, float64, int64, boolean
 from numba.experimental import jitclass
+from numba import njit, prange
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 
@@ -21,6 +23,10 @@ spec = [
     ('determinants', float64[:]),
     ('inverse_mats', float64[:, :, :]),
     ('changed_clusters', boolean[:]), #?
+    ('prev_labels', int64[:]),
+    ('prev_likelihood', float64),
+
+    #debug varibles
     ('labels_history', types.ListType(int_vector)),
     ('likelihoods_history', types.ListType(types.float64))
 ]
@@ -28,7 +34,7 @@ spec = [
 
 @jitclass(spec)
 class SIML:
-    def __init__(self, data_X, cluster_labels, update_parts=1, iter_limit=100, debug=False):
+    def __init__(self, data_X, cluster_labels, update_parts=1, iter_limit=100, debug=True):
         self.data_X = data_X
         self.cluster_labels = cluster_labels.copy()
         self.update_parts = update_parts
@@ -43,6 +49,12 @@ class SIML:
         self.inverse_mats = np.zeros(shape=(self.number_clusters, self.data_X.shape[1], self.data_X.shape[1]))
         self.changed_clusters = np.ones(self.number_clusters, dtype=boolean)
 
+        self.update_vars()
+
+        self.prev_labels = self.cluster_labels.copy()
+        self.prev_likelihood = self.count_likelihood()
+
+        # debug varible
 
         self.labels_history = typed.List.empty_list(int_vector)
         self.likelihoods_history = typed.List.empty_list(types.float64)
@@ -73,7 +85,7 @@ class SIML:
             self.determinants[cluster] = np.linalg.det(self.covariances[cluster])
             self.inverse_mats[cluster] = np.linalg.inv(self.covariances[cluster])
 
-    def make_iter(self, lhs, rhs):
+    def make_iter(self, group):
         self.update_vars()
 
         deltas = np.zeros(self.number_clusters)
@@ -83,7 +95,7 @@ class SIML:
         changed = False
         self.changed_clusters = np.zeros(self.number_clusters, dtype=boolean)
 
-        for i in range(lhs, rhs):
+        for i in group:
             x = self.data_X[i]
             cur_label = self.cluster_labels[i]
 
@@ -123,22 +135,55 @@ class SIML:
         return changed
 
     def cluster(self):
-        part_size = (len(self.data_X) + self.update_parts - 1) // self.update_parts
+        # part_size = (len(self.data_X) + self.update_parts - 1) // self.update_parts
         changed = True
         counter = 0
 
         while changed and counter < self.iter_limit:
+
             counter += 1
-            lhs = 0
-            rhs = part_size
+            # lhs = 0
+            # rhs = part_size
             changed = False
 
-            while lhs < len(self.data_X):
-                changed = changed or self.make_iter(lhs, rhs)
+            # self.prev_labels = self.cluster_labels.copy()
+            # self.prev_likelihood = self.count_likelihood()
 
-                lhs += part_size
-                rhs += part_size
-                rhs = min(len(self.data_X), rhs)
+            indexes = np.arange(len(self.data_X))
+            np.random.shuffle(indexes)
+            group_indexes = np.array_split(indexes, self.update_parts)
+
+            for group in group_indexes:
+                changed = changed or self.make_iter(group)
+                if self.cluster_labels[-1] < self.likelihoods_history[-2]:
+                    self.cluster_labels = self.labels_history[-1].copy()
+
+
+
+
+            # while lhs < len(self.data_X):
+            #     changed = changed or self.make_iter(lhs, rhs)
+
+            #     lhs += part_size
+            #     rhs += part_size
+            #     rhs = min(len(self.data_X), rhs)
+
+            #     # FIX ME
+            #     if self.likelihoods_history[-1] < self.likelihoods_history[-2]:
+            #         self.cluster_labels = self.labels_history[-1].copy()
+            #         # self.data_X = self.data_X[np.random.permutation(self.data_X.shape[0])]
+                    
+
+
+            # new_likelihood = self.count_likelihood()
+
+            # if self.prev_likelihood > new_likelihood:
+            #     self.cluster_labels = self.prev_labels.copy()
+            #     return
+            # else:
+            #     self.prev_likelihood = new_likelihood
+            #     self.prev_labels = self.cluster_labels.copy()
+
 
 # %%
 def labels_history_to_video(data_X, labels_history, interval, output_name, alpha=1):
@@ -176,7 +221,7 @@ if __name__ == '__main__':
                             np.random.uniform(2.3, 3.3, size)\
                             ]).round().astype(int)
     
-    siml = SIML(x, labels, debug=True)
+    siml = SIML(x, labels, debug=True, update_parts=5)
     siml.cluster()
 
     plt.scatter(x[:, 0], x[:, 1], c=labels)
@@ -190,13 +235,13 @@ if __name__ == '__main__':
     plt.plot(range(len(siml.likelihoods_history)), siml.likelihoods_history)
     plt.show()
 
-    labels_history_to_video(x, siml.labels_history[:200], 50, 'test.gif')
+    # labels_history_to_video(x, siml.labels_history[:200], 50, 'test.gif')
 
 
 # %%
 if __name__ == '__main__':
-    length = 10000
-    dimension = 8
+    length = 100
+    dimension = 2
 
     X = np.random.normal(size=(length, dimension - 1))
     Y = np.concatenate([np.random.normal(loc=-2, size=(length // 2, 1)), 
@@ -207,7 +252,7 @@ if __name__ == '__main__':
     labels = np.concatenate([np.random.random(length // 2)*0.7,\
                             0.3 + np.random.random(length // 2)*0.7], axis=0).round().astype(int)
 
-    siml = SIML(X, labels, debug=True)
+    siml = SIML(X, labels, debug=True, update_parts=5, iter_limit=1000)
     siml.cluster()
 
     plt.title('Initital labels')
@@ -224,4 +269,3 @@ if __name__ == '__main__':
     plt.show()
 
 
-# %%
